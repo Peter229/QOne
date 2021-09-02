@@ -48,7 +48,7 @@ fn main() -> Result<()> {
         glob("./src/**/*.frag")?,
         glob("./src/**/*.comp")?,
     ];
-
+    
     // This could be parallelized
     let shaders = shader_paths
         .iter_mut()
@@ -60,6 +60,7 @@ fn main() -> Result<()> {
 
     let mut compiler = shaderc::Compiler::new().context("Unable to create shader compiler")?;
 
+    
     // This can't be parallelized. The [shaderc::Compiler] is not
     // thread safe. Also, it creates a lot of resources. You could
     // spawn multiple processes to handle this, but it would probably

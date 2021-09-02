@@ -19,13 +19,6 @@ pub const DELTA: f32 = 16.666666666666 * 0.001;
 const GRAVITY: f32 = 800.0;
 //const STOP_SPEED: f32 = 200.0;
 const MAX_SPEED: f32 = 320.0;
-const MOVEMENT_ACCELERATION: f32 = 15.0;
-const MOVEMENT_FRICTION: f32 = 8.0;
-const AIR_STOP_ACCELERATION: f32 = 2.5;
-const MOVEMENT_AIR_ACCELERATION: f32 = 7.0;
-const CPM_WISH_SPEED: f32 = 30.0;
-const CPM_STRAFE_ACCELERATION: f32 = 70.0;
-const CPM_AIR_CONTROL_AMOUNT: f32 = 150.0;
 
 const STEP_SIZE: f32 = 18.0;
 
@@ -46,7 +39,12 @@ const BACKWARD_SPEED: f32 = 200.0;
 const SIDE_SPEED: f32 = 350.0;
 const JUMP_VELOCITY: f32 = 270.0;
 
+const WATER_ACCELERATE: f32 = 10.0;
+
 const BUTTON_JUMP: i32 = 2;
+
+pub const PLAYER_MINS: [f32; 3] = [-16.0, -16.0, -24.0];
+pub const PLAYER_MAXS: [f32; 3] = [16.0, 16.0, 32.0];
 
 //Quake World values
 //cl_forwardspeed = 200
@@ -78,6 +76,8 @@ pub struct Player {
     on_ground: i32,
     running: f32,
     pub delta_time: f32,
+    water_level: i32,
+    water_type: i32,
 }
 
 impl Player {
@@ -96,6 +96,8 @@ impl Player {
             on_ground: -1,
             running: RUNNING,
             delta_time: 0.0,
+            water_level: 0,
+            water_type: qone_bsp::CONTENTS_EMPTY,
         }
     }
 
@@ -243,12 +245,18 @@ impl Player {
 
     fn jump_button(&mut self) {
 
+        if self.water_level >= 2 {
+            self.on_ground = -1;
+            self.velocity.z = 100.0;
+            return;
+        }
+
         if self.on_ground == -1 {
             return;
         }
 
         self.on_ground = -1;
-        self.velocity.z += JUMP_VELOCITY;
+        self.velocity.z = JUMP_VELOCITY;
         self.movement |= BUTTON_JUMP;
     }
 
@@ -267,9 +275,57 @@ impl Player {
 
         self.friction();
 
-        self.air_move(bsp);
+        if self.water_level >= 2 {
+            self.water_move(bsp);
+        }
+        else {
+            self.air_move(bsp);
+        }
 
         self.catagorize_position(bsp);
+    }
+
+    fn water_move(&mut self, bsp: &mut qone_bsp::Bsp) {
+
+        let fmove = self.wish_dir.x;
+        let smove = self.wish_dir.y;
+
+        let mut wish_vel = cgmath::Vector3::new(0.0, 0.0, 0.0);
+
+        let mut forward = cgmath::Vector3::new(self.yaw.cos() * self.pitch.cos(), self.yaw.sin() * self.pitch.cos(), self.pitch.sin());
+        let mut right = forward.cross(cgmath::Vector3::unit_z());
+
+        for i in 0..3 {
+            wish_vel[i] = forward[i] * fmove + right[i] * smove;
+        }
+
+        if wish_vel[0] == 0.0 && wish_vel[1] == 0.0 && wish_vel[2] == 0.0 {
+            wish_vel.z -= 60.0;
+        }
+
+        let mut wish_dir = wish_vel.normalize();
+        let mut wish_speed = wish_vel.magnitude();
+        
+        if wish_speed >  MAX_SPEED {
+            wish_vel = wish_vel * (MAX_SPEED / wish_speed);
+            wish_speed = MAX_SPEED;
+        }
+        wish_speed *= 0.7;
+
+        self.accelerate(wish_dir, wish_speed, WATER_ACCELERATE);
+
+        let dest = self.position + self.delta_time * self.velocity;
+        let mut start = dest;
+
+        start.z += STEP_SIZE + 1.0;
+
+        let trace = bsp.player_trace(start, dest);
+        if !trace.starts_solid && !trace.all_solid {
+            self.position = trace.end_pos;
+            return;
+        }
+
+        self.fly_move(bsp);
     }
 
     fn nudge_position(&mut self, bsp: &mut qone_bsp::Bsp) {
@@ -305,13 +361,16 @@ impl Player {
 
         let speed = self.velocity.magnitude();
         if speed < 1.0 {
-            vel[0] = 0.0;
-            vel[1] = 0.0;
+            self.velocity[0] = 0.0;
+            self.velocity[1] = 0.0;
             return;
         }
 
         let mut drop = 0.0;
-        if self.on_ground != -1 {
+        if self.water_level >= 2 {
+            drop += speed * 4.0 * self.water_level as f32 *  self.delta_time;
+        }
+        else if self.on_ground != -1 {
             let mut control = speed;
             if speed < STOP_SPEED {
                 control = STOP_SPEED;
@@ -356,6 +415,29 @@ impl Player {
 
             }
         }
+
+
+        self.water_level = 0;
+        self.water_type = qone_bsp::CONTENTS_WATER;
+        point.z = self.position.z + PLAYER_MINS[2] + 1.0;
+        let mut cont = bsp.point_contents(point);
+
+        if cont <= qone_bsp::CONTENTS_WATER {
+            self.water_type = cont;
+            self.water_level = 1;
+            point.z = self.position.z + (PLAYER_MINS[2] + PLAYER_MAXS[2]) * 0.5;
+            cont = bsp.point_contents(point);
+            if cont <= qone_bsp::CONTENTS_WATER {
+                self.water_level = 2;
+                point.z = self.position.z + 22.0;
+                cont = bsp.point_contents(point);
+                if cont <= qone_bsp::CONTENTS_WATER {
+                    self.water_level = 3;
+                }
+            }
+        }
+
+        //println!("woa {}", cont);
     }
 
     pub fn fly_move(&mut self, bsp: &mut qone_bsp::Bsp) {
@@ -451,12 +533,6 @@ impl Player {
     pub fn ground_move(&mut self, bsp: &mut qone_bsp::Bsp) {
 
         self.velocity[2] = 0.0;
-        if self.velocity[0].abs() < 1.0 {
-            self.velocity[0] = 0.0;
-        }
-        if self.velocity[1].abs() < 1.0 {
-            self.velocity[1] = 0.0;
-        }
         if self.velocity[0] == 0.0 && self.velocity[1] == 0.0 && self.velocity[2] == 0.0 {
             return;
         }

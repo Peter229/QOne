@@ -12,12 +12,12 @@ impl Texture {
 
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    pub fn create_depth_texture(device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor, label: &str) -> Self {
+    pub fn create_depth_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, label: &str) -> Self {
 
         let size = wgpu::Extent3d {
-            width: sc_desc.width,
-            height: sc_desc.height,
-            depth: 1,
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
         };
         let desc = wgpu::TextureDescriptor {
             label: Some(label),
@@ -26,16 +26,16 @@ impl Texture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: Self::DEPTH_FORMAT,
-            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT | wgpu::TextureUsage::SAMPLED,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         };
         let texture = device.create_texture(&desc);
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(
             &wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::Repeat,
-                address_mode_v: wgpu::AddressMode::Repeat,
-                address_mode_w: wgpu::AddressMode::Repeat,
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
                 compare: Some(wgpu::CompareFunction::LessEqual),
@@ -61,6 +61,148 @@ impl Texture {
         Self::from_image(device, queue, &img, label)
     }
 
+    pub fn from_array_rgb_light_map(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rgba: &mut Vec<u8>,
+        i_size: u32,
+        i_label: &str
+    ) -> Result<Self> {
+
+        for i in (rgba.len() / 4)..((i_size * i_size) as usize) {
+            rgba.push(0);
+            rgba.push(0);
+            rgba.push(0);
+            rgba.push(255);
+        }
+
+        let size = wgpu::Extent3d {
+            width: i_size,
+            height: i_size,
+            depth_or_array_layers: 1,
+        };
+
+        let texture = device.create_texture(
+            &wgpu::TextureDescriptor {
+                label: Some(i_label),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            }
+        );
+
+        queue.write_texture(
+            wgpu::ImageCopyTextureBase {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &rgba,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: core::num::NonZeroU32::new(4 * i_size),
+                rows_per_image: core::num::NonZeroU32::new(i_size),
+            },
+            size,
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let sampler = device.create_sampler (
+            &wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::Repeat,
+                address_mode_v: wgpu::AddressMode::Repeat,
+                address_mode_w: wgpu::AddressMode::Repeat,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            }
+        );
+
+        Ok(Self { texture, view, sampler })
+    }
+
+    pub fn from_array_light_map(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bytes: &[u8],
+        i_size: u32,
+        i_label: &str
+    ) -> Result<Self> {
+
+        let mut rgba: Vec<u8> = Vec::new();
+        for i in 0..(i_size * i_size) {
+
+            if i < bytes.len() as u32 {
+                rgba.push(bytes[i as usize]);
+                rgba.push(bytes[i as usize]);
+                rgba.push(bytes[i as usize]);
+                rgba.push(255);
+            }
+            else {
+                rgba.push(0);
+                rgba.push(0);
+                rgba.push(0);
+                rgba.push(255);
+            }
+        }
+
+        let size = wgpu::Extent3d {
+            width: i_size,
+            height: i_size,
+            depth_or_array_layers: 1,
+        };
+
+        let texture = device.create_texture(
+            &wgpu::TextureDescriptor {
+                label: Some(i_label),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            }
+        );
+
+        queue.write_texture(
+            wgpu::ImageCopyTextureBase {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &rgba,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: core::num::NonZeroU32::new(4 * i_size),
+                rows_per_image: core::num::NonZeroU32::new(i_size),
+            },
+            size,
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let sampler = device.create_sampler (
+            &wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::Repeat,
+                address_mode_v: wgpu::AddressMode::Repeat,
+                address_mode_w: wgpu::AddressMode::Repeat,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            }
+        );
+
+        Ok(Self { texture, view, sampler })
+    }
+
     pub fn from_array_to_array(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -70,23 +212,10 @@ impl Texture {
         i_label: &str
     ) -> Result<Self> {
 
-        //let img = image::load_from_memory(bytes)?;
-        //let p_t = image::Pixel::from_channels(0, 1, 2, 3);
-        //let buf: image::ImageBuffer<p_t, _> = image::ImageBuffer::from_raw(size, size, bytes).unwrap();
-        //let img = image::DynamicImage::ImageRgb8(buf);
-
-        /*let mut rgba: Vec<u8> = Vec::new();
-        for i in (0..bytes.len()).step_by(3) {
-            rgba.push(bytes[i]);
-            rgba.push(bytes[i + 1]);
-            rgba.push(bytes[i + 2]);
-            rgba.push(255u8);
-        }*/
-
         let size = wgpu::Extent3d {
             width: i_size,
             height: i_size,
-            depth: n_ims,
+            depth_or_array_layers: n_ims,
         };
         let texture = device.create_texture(
             &wgpu::TextureDescriptor {
@@ -96,21 +225,22 @@ impl Texture {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             }
         );
 
         queue.write_texture(
-            wgpu::TextureCopyView {
+            wgpu::ImageCopyTextureBase {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
             },
             bytes,
-            wgpu::TextureDataLayout {
+            wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: 4 * i_size,
-                rows_per_image: i_size,
+                bytes_per_row: core::num::NonZeroU32::new(4 * i_size),
+                rows_per_image: core::num::NonZeroU32::new(i_size),
             },
             size,
         );
@@ -121,7 +251,7 @@ impl Texture {
                 address_mode_u: wgpu::AddressMode::Repeat,
                 address_mode_v: wgpu::AddressMode::Repeat,
                 address_mode_w: wgpu::AddressMode::Repeat,
-                mag_filter: wgpu::FilterMode::Linear,
+                mag_filter: wgpu::FilterMode::Nearest,
                 min_filter: wgpu::FilterMode::Nearest,
                 mipmap_filter: wgpu::FilterMode::Nearest,
                 ..Default::default()
@@ -138,11 +268,6 @@ impl Texture {
         i_size: u32,
         i_label: &str
     ) -> Result<Self> {
-
-        //let img = image::load_from_memory(bytes)?;
-        //let p_t = image::Pixel::from_channels(0, 1, 2, 3);
-        //let buf: image::ImageBuffer<p_t, _> = image::ImageBuffer::from_raw(size, size, bytes).unwrap();
-        //let img = image::DynamicImage::ImageRgb8(buf);
         
         let mut rgba: Vec<u8> = Vec::new();
         for i in (0..bytes.len()).step_by(3) {
@@ -155,7 +280,7 @@ impl Texture {
         let size = wgpu::Extent3d {
             width: i_size,
             height: i_size,
-            depth: 1,
+            depth_or_array_layers: 1,
         };
         let texture = device.create_texture(
             &wgpu::TextureDescriptor {
@@ -165,21 +290,22 @@ impl Texture {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             }
         );
 
         queue.write_texture(
-            wgpu::TextureCopyView {
+            wgpu::ImageCopyTextureBase {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
             },
             &rgba,
-            wgpu::TextureDataLayout {
+            wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: 4 * i_size,
-                rows_per_image: i_size,
+                bytes_per_row: core::num::NonZeroU32::new(4 * i_size),
+                rows_per_image: core::num::NonZeroU32::new(i_size),
             },
             size,
         );
@@ -190,7 +316,7 @@ impl Texture {
                 address_mode_u: wgpu::AddressMode::Repeat,
                 address_mode_v: wgpu::AddressMode::Repeat,
                 address_mode_w: wgpu::AddressMode::Repeat,
-                mag_filter: wgpu::FilterMode::Linear,
+                mag_filter: wgpu::FilterMode::Nearest,
                 min_filter: wgpu::FilterMode::Nearest,
                 mipmap_filter: wgpu::FilterMode::Nearest,
                 ..Default::default()
@@ -212,7 +338,7 @@ impl Texture {
         let size = wgpu::Extent3d {
             width: i_size,
             height: v_size,
-            depth: 1,
+            depth_or_array_layers: 1,
         };
         let texture = device.create_texture(
             &wgpu::TextureDescriptor {
@@ -222,21 +348,22 @@ impl Texture {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             }
         );
 
         queue.write_texture(
-            wgpu::TextureCopyView {
+            wgpu::ImageCopyTextureBase {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
             },
             bytes,
-            wgpu::TextureDataLayout {
+            wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: 4 * i_size,
-                rows_per_image: v_size,
+                bytes_per_row: core::num::NonZeroU32::new(4 * i_size),
+                rows_per_image: core::num::NonZeroU32::new(v_size),
             },
             size,
         );
@@ -247,7 +374,7 @@ impl Texture {
                 address_mode_u: wgpu::AddressMode::Repeat,
                 address_mode_v: wgpu::AddressMode::Repeat,
                 address_mode_w: wgpu::AddressMode::Repeat,
-                mag_filter: wgpu::FilterMode::Linear,
+                mag_filter: wgpu::FilterMode::Nearest,
                 min_filter: wgpu::FilterMode::Nearest,
                 mipmap_filter: wgpu::FilterMode::Nearest,
                 ..Default::default()
@@ -293,7 +420,7 @@ impl Texture {
         let size = wgpu::Extent3d {
             width: dimensions.0,
             height: dimensions.1,
-            depth: 1,
+            depth_or_array_layers: 1,
         };
         let texture = device.create_texture(
             &wgpu::TextureDescriptor {
@@ -303,21 +430,22 @@ impl Texture {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             }
         );
 
         queue.write_texture(
-            wgpu::TextureCopyView {
+            wgpu::ImageCopyTextureBase {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
             },
             &rgba,
-            wgpu::TextureDataLayout {
+            wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: 4 * dimensions.0,
-                rows_per_image: dimensions.1,
+                bytes_per_row: core::num::NonZeroU32::new(4 * dimensions.0),
+                rows_per_image: core::num::NonZeroU32::new(dimensions.1),
             },
             size,
         );

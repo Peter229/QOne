@@ -14,38 +14,56 @@ pub struct RVertex {
     r: f32,
     b: f32,
     g: f32,
-    u: f32,
-    v: f32,
-    lu: f32,
-    lv: f32,
+    pub u: f32,
+    pub v: f32,
+    pub lu: f32,
+    pub lv: f32,
+    pub light_style: [u32; 4],
+    pub extent: [f32; 2],
+    pub light_id: i32,
 }
 
 impl RVertex {
 
-    pub fn desc<'a>() -> wgpu::VertexBufferDescriptor<'a> {
-        wgpu::VertexBufferDescriptor {
-            stride: std::mem::size_of::<RVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::InputStepMode::Vertex,
+    pub fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<RVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
-                wgpu::VertexAttributeDescriptor {
+                wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 0,
-                    format: wgpu::VertexFormat::Float3,
+                    format: wgpu::VertexFormat::Float32x3,
                 },
-                wgpu::VertexAttributeDescriptor {
+                wgpu::VertexAttribute {
                     offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
                     shader_location: 1,
-                    format: wgpu::VertexFormat::Float3,
+                    format: wgpu::VertexFormat::Float32x3,
                 },
-                wgpu::VertexAttributeDescriptor {
+                wgpu::VertexAttribute {
                     offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
                     shader_location: 2,
-                    format: wgpu::VertexFormat::Float2,
+                    format: wgpu::VertexFormat::Float32x2,
                 },
-                wgpu::VertexAttributeDescriptor {
+                wgpu::VertexAttribute {
                     offset: std::mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
                     shader_location: 3,
-                    format: wgpu::VertexFormat::Float2,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 10]>() as wgpu::BufferAddress,
+                    shader_location: 4,
+                    format: wgpu::VertexFormat::Uint32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 14]>() as wgpu::BufferAddress,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 16]>() as wgpu::BufferAddress,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Sint32,
                 },
             ],
         }
@@ -82,8 +100,9 @@ pub struct Vertex {
 }
 
 impl Vertex {
-    pub fn to_rvertex(&self, r: f32, g: f32, b: f32, u: f32, v: f32, lu: f32, lv: f32) -> RVertex {
-        RVertex { x: self.x, y: self.y, z: self.z, r, g, b, u, v, lu, lv }
+    pub fn to_rvertex(&self, r: f32, g: f32, b: f32, u: f32, v: f32, lu: f32, lv: f32, light_style: [u8; 4], extent: [f32; 2], light_id: i32) -> RVertex {
+        RVertex { x: self.x, y: self.y, z: self.z, r, g, b, u, v, lu, lv, light_style: [light_style[0] as u32, light_style[1] as u32, light_style[2] as u32, light_style[3] as u32],
+                extent, light_id }
     }
 
     pub fn get_cgvec3(&self) -> cgmath::Vector3<f32> {
@@ -234,10 +253,70 @@ pub struct Material {
     pub diffuse_texture: texture::Texture,
     pub bind_group: wgpu::BindGroup,
     pub tex_type: i32,
+    pub transparent: bool,
 }
 
 pub struct EntityInfo {
     pub type_e: i32,
     pub render_debug: i32,
     pub collide: i32,
+}
+
+//BSP 2
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Node2 {
+    pub plane_num: i32,
+    pub children: [i32; 2],
+    pub mins: [u16; 3],
+    pub maxs: [u16; 3],
+    pub first_face: u32,
+    pub num_faces: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ClipNode2 {
+    pub plane_num: i32,
+    pub children: [i32; 2],
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Edge2 {
+    pub v: [u32; 2],
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Face2 {
+    pub plane_num: i32,
+    pub side: i32,
+    pub first_edge: i32,
+    pub num_edges: i32,
+    pub tex_info: i32,
+    pub styles: [u8; 4],
+    pub light_ofs: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Leaf2 {
+    pub contents: i32,
+    pub visofs: i32,
+    pub mins: [u16; 3],
+    pub maxs: [u16; 3],
+    pub first_mark_surface: u32,
+    pub num_mark_surfaces: u32,
+    pub ambient_level: [u8; 4],
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Hull {
+    pub clip_nodes_id: usize,
+    pub planes_id: usize, 
+    pub first_clip_node: i32,
+    pub last_clip_node: i32,
+    pub mins: [f32; 3],
+    pub maxs: [f32; 3],
 }

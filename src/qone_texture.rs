@@ -12,8 +12,8 @@ pub struct Colour {
 }
 
 impl Colour {
-    pub fn add_alpha(&mut self) -> ColourAlpha {
-        ColourAlpha { r: self.r, g: self.g, b: self.b, a: 255 }
+    pub fn add_alpha(&mut self, a: u8) -> ColourAlpha {
+        ColourAlpha { r: self.r, g: self.g, b: self.b, a }
     }
 }
 
@@ -37,16 +37,17 @@ pub fn load_pallete() -> Vec<Colour> {
 }
 
 pub fn parse_textures(entry: Entry, bytes: &[u8], palette: &Vec<Colour>, device: &wgpu::Device, queue: &wgpu::Queue, layout: &wgpu::BindGroupLayout) -> (Vec<Material>, Vec<MipTex>) {
+    
     let mut textures: Vec<Material> = Vec::new();
     let mut mip_texs: Vec<MipTex> = Vec::new();
+    let mut num_default = 0;
+    
     let num_tex = *bytemuck::from_bytes::<i32>(&bytes[(entry.offset as usize)..(entry.offset as usize + std::mem::size_of::<i32>())]);
     let mut total_offset = 0;
     for i in 0..num_tex {
         let offset = *bytemuck::from_bytes::<i32>(&bytes[(entry.offset as usize + std::mem::size_of::<i32>() * (i as usize + 1))..(entry.offset as usize + std::mem::size_of::<i32>() * (i as usize + 2))]);
         let header_size = std::mem::size_of::<i32>() + (std::mem::size_of::<i32>() * (num_tex as usize));
-        
         let mip_tex = *bytemuck::from_bytes::<MipTex>(&bytes[((entry.offset + offset) as usize)..((entry.offset + offset) as usize + std::mem::size_of::<MipTex>())]);
-        
         let size = (mip_tex.width * mip_tex.height) as usize;
         let tex_name = std::str::from_utf8(&mip_tex.name).unwrap();
         let mut tex_type = TEX_DEBUG;
@@ -69,8 +70,15 @@ pub fn parse_textures(entry: Entry, bytes: &[u8], palette: &Vec<Colour>, device:
         let texture_colour_indices = &bytes[(start_data)..(end_data)];
 
         let mut texels: Vec<ColourAlpha> = Vec::new();
+        let mut transparent = false;
         for ind in texture_colour_indices {
-            texels.push(palette[*ind as usize].clone().add_alpha());
+            if *ind == 255 {
+                transparent = true;
+                texels.push(palette[*ind as usize].clone().add_alpha(0));
+            }
+            else {
+                texels.push(palette[*ind as usize].clone().add_alpha(255));
+            }
         }
 
         let diffuse_texture = texture::Texture::from_array_with_alpha(device, queue, bytemuck::cast_slice(&texels), mip_tex.width, mip_tex.height, "Level texture").unwrap();
@@ -92,7 +100,7 @@ pub fn parse_textures(entry: Entry, bytes: &[u8], palette: &Vec<Colour>, device:
         //let path = "./".to_string() + &i.to_string() + ".png";
         //image::save_buffer_with_format(path, bytemuck::cast_slice(&texels), mip_tex.width, mip_tex.height, image::ColorType::Rgba8, image::ImageFormat::Png).unwrap();
         mip_texs.push(mip_tex);
-        textures.push(Material { diffuse_texture, bind_group, tex_type });
+        textures.push(Material { diffuse_texture, bind_group, tex_type, transparent });
     }
     (textures, mip_texs)
 }
